@@ -21,6 +21,7 @@ def to_numpy(X):
 
 
 def run_ensemble_experiment(data: EnsembleInput) -> EnsembleResult:
+    """Обучает модели, выбирает лучшую на валидации и оценивает на тесте."""
     seed = data.random_seed
 
     X_train_full = to_numpy(data.train_features)
@@ -81,17 +82,60 @@ def run_ensemble_experiment(data: EnsembleInput) -> EnsembleResult:
     )
 
 
+# ==========================================
+# ЧЕСТНОЕ СРАВНЕНИЕ ВСЕХ МОДЕЛЕЙ ДЛЯ ОТЧЁТА
+# ==========================================
 if __name__ == "__main__":
-    print("Запуск эксперимента с ансамблями (с валидационным сплитом)...")
-
+    print(" Запуск полного честного сравнения всех моделей...")
+    
     df = pd.read_csv("german.csv", sep=";")
     y = df.iloc[:, 0]
     X = df.iloc[:, 1:]
-
+    
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
+    
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    models_to_compare = {
+        "RandomForest": RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42),
+        "GradientBoosting": GradientBoostingClassifier(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42),
+        "MLPClassifier": MLPClassifier(hidden_layer_sizes=(100, 50), max_iter=1000, random_state=42, early_stopping=True)
+    }
+    
+    all_results = {}
+    
+    print("\n--- РЕАЛЬНЫЕ МЕТРИКИ НА ТЕСТЕ ДЛЯ ВСЕХ МОДЕЛЕЙ ---")
+    for name, model in models_to_compare.items():
+        model.fit(X_train_scaled, y_train)
+        probs = model.predict_proba(X_test_scaled)[:, 1]
+        preds = model.predict(X_test_scaled)
+        
+        r_auc = float(roc_auc_score(y_test, probs))
+        acc = float(accuracy_score(y_test, preds))
+        prec = float(precision_score(y_test, preds, zero_division=0))
+        rec = float(recall_score(y_test, preds, zero_division=0))
+        f1 = float(f1_score(y_test, preds, zero_division=0))
+        
+        all_results[name] = {
+            "roc_auc": round(r_auc, 4),
+            "accuracy": round(acc, 4),
+            "precision": round(prec, 4),
+            "recall": round(rec, 4),
+            "f1": round(f1, 4)
+        }
+        print(f"{name:16} | ROC-AUC: {r_auc:.4f} | Acc: {acc:.4f} | Prec: {prec:.4f} | Rec: {rec:.4f} | F1: {f1:.4f}")
 
+    # Сохраняем реальные метрики всех моделей в JSON
+    with open("experiment_results.json", "w", encoding="utf-8") as f:
+        json.dump(all_results, f, indent=4)
+    
+    print("\n Реальные метрики всех моделей сохранены в experiment_results.json!")
+    
+    # Также проверяем работу контрактной функции
     class MockInput:
         def __init__(self):
             self.train_features = X_train
@@ -100,28 +144,5 @@ if __name__ == "__main__":
             self.test_target = y_test.values
             self.random_seed = 42
 
-    data = MockInput()
-    result = run_ensemble_experiment(data)
-
-    print(f"\nИТОГОВЫЕ МЕТРИКИ НА ТЕСТЕ ({result.model_name}):")
-    print(f"ROC-AUC:   {result.roc_auc:.4f}")
-    print(f"Accuracy:  {result.accuracy:.4f}")
-    print(f"Precision: {result.precision:.4f}")
-    print(f"Recall:    {result.recall:.4f}")
-    print(f"F1:        {result.f1:.4f}")
-
-    results_dict = {
-        "best_model": result.model_name,
-        "metrics": {
-            "roc_auc": result.roc_auc,
-            "accuracy": result.accuracy,
-            "precision": result.precision,
-            "recall": result.recall,
-            "f1": result.f1
-        }
-    }
-
-    with open("experiment_results.json", "w", encoding="utf-8") as f:
-        json.dump(results_dict, f, indent=4)
-
-    print("\nФайл experiment_results.json обновлён!")
+    final_result = run_ensemble_experiment(MockInput())
+    print(f"\n Контрактная функция вернула: {final_result.model_name}, ROC-AUC: {final_result.roc_auc:.4f}")
